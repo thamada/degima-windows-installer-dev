@@ -4,6 +4,18 @@
 >   本ドキュメントは変更履歴です。日付はdateコマンドで確認して2026-01-23 12:34:55のように年-月-日 時:分:秒のようにします。
 >   最も最新のものから順に並べて記入します。
 
+## 2026-06-19 01:44:27
+
+- ビルドコマンドをプラットフォーム別に分割
+  - `make build-win` — Windows ポータブル版（`dist/myapp.exe`）
+  - `make build-win-nsis` — Windows NSIS インストーラー（`dist/setup.exe`）
+  - `make build-mac` — macOS DMG（`dist/myapp.dmg`）
+  - `make build` — 上記 3 つをすべて実行
+  - `package.json` に `build:win` / `build:win-nsis` / `build:mac` スクリプトを追加
+- アプリアイコンを追加
+  - `resources/icon.png`（1024×1024、角丸透過）を配置
+  - `electron-builder` の `icon` および `main.js` のウィンドウ・Dock アイコンに設定
+
 ## 2026-06-19 01:05:10
 
 - インベーダーゲームに自機被弾時の爆発演出を追加

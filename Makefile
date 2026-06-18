@@ -1,4 +1,4 @@
-.PHONY: build install dev clean
+.PHONY: build build-win build-win-nsis build-mac install dev clean
 
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 NODE_VERSION := 22.14.0
@@ -35,8 +35,16 @@ NPM := $(NODE) $(NPM_CLI)
 # npm / node_modules/.bin の shebang (#!/usr/bin/env node) がローカル Node を使うようにする
 export PATH := $(NODE_DIR)/bin:$(PATH)
 
-build: install
-	$(NPM) run build
+build: build-win build-win-nsis build-mac
+
+build-win: install
+	$(NPM) run build:win
+
+build-win-nsis: install
+	$(NPM) run build:win-nsis
+
+build-mac: install
+	$(NPM) run build:mac
 
 install: $(NODE)
 	$(NPM) install

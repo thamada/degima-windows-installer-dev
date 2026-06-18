@@ -7,7 +7,9 @@
   "license": "Apache-2.0",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win portable nsis --x64 --mac dmg"
+    "build:win": "electron-builder --win portable --x64",
+    "build:win-nsis": "electron-builder --win nsis --x64",
+    "build:mac": "electron-builder --mac dmg"
   },
   "devDependencies": {
     "electron": "^35.1.5",
@@ -16,6 +18,7 @@
   "build": {
     "appId": "cc.degima.msapp",
     "productName": "Invaders",
+    "icon": "resources/icon.png",
     "directories": {
       "output": "dist"
     },
