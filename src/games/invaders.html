@@ -17,7 +17,7 @@ canvas{border:2px solid #0f0;box-shadow:0 0 20px #0f0;max-width:100%;max-height:
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
 
-let player, invaders, bullets, enemyBullets, score, lives, wave, dir, gameOver, keys = {}, shootCooldown = 0;
+let player, invaders, bullets, enemyBullets, score, lives, wave, dir, gameOver, keys = {}, shootCooldown = 0, explosion = null;
 
 function init(resetScore) {
   player = { x: 300, y: 450, w: 40, h: 20, speed: 5 };
@@ -39,6 +39,7 @@ function init(resetScore) {
   dir = 1;
   gameOver = false;
   shootCooldown = 0;
+  explosion = null;
 }
 
 function nextWave() {
@@ -69,7 +70,79 @@ function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
+function startPlayerExplosion() {
+  const cx = player.x + player.w / 2;
+  const cy = player.y + player.h / 2;
+  const particles = [];
+  for (let i = 0; i < 32; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1.5 + Math.random() * 5.5;
+    particles.push({
+      x: cx,
+      y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: 2 + Math.random() * 4,
+      life: 24 + Math.floor(Math.random() * 20),
+      color: ["#ff0", "#fa0", "#f60", "#f00", "#0f0"][Math.floor(Math.random() * 5)]
+    });
+  }
+  explosion = { cx, cy, frame: 0, duration: 50, particles };
+}
+
+function updateExplosion() {
+  explosion.frame++;
+  for (const p of explosion.particles) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.06;
+    p.life--;
+  }
+  explosion.particles = explosion.particles.filter(p => p.life > 0);
+
+  if (explosion.frame >= explosion.duration) {
+    explosion = null;
+    if (lives <= 0) {
+      gameOver = true;
+    } else {
+      player.x = (canvas.width - player.w) / 2;
+      player.y = 450;
+    }
+  }
+}
+
+function drawExplosion() {
+  const t = explosion.frame / explosion.duration;
+  const flashRadius = 8 + t * 36;
+  const ringRadius = 4 + t * 28;
+
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - t * 1.2);
+  ctx.fillStyle = "#ff0";
+  ctx.beginPath();
+  ctx.arc(explosion.cx, explosion.cy, flashRadius * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "#f80";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(explosion.cx, explosion.cy, ringRadius, 0, Math.PI * 2);
+  ctx.stroke();
+
+  for (const p of explosion.particles) {
+    const alpha = Math.max(0, p.life / 30);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.restore();
+}
+
 function update() {
+  if (explosion) {
+    updateExplosion();
+    return;
+  }
   if (gameOver) return;
 
   if (keys.ArrowLeft) player.x = Math.max(0, player.x - player.speed);
@@ -105,7 +178,7 @@ function update() {
     if (rectsOverlap(b.x, b.y, b.w, b.h, player.x, player.y, player.w, player.h)) {
       enemyBullets.splice(i, 1);
       lives--;
-      if (lives <= 0) gameOver = true;
+      startPlayerExplosion();
     }
   }
 
@@ -183,12 +256,33 @@ function drawPlayer(x, y, w, h) {
   ctx.fill();
 }
 
+function drawLivesHUD() {
+  const iconW = 16;
+  const iconH = 9;
+  const gap = 6;
+  const padding = 10;
+  const y = 10;
+  const totalW = lives > 0 ? lives * iconW + (lives - 1) * gap : 0;
+  const startX = canvas.width - padding - totalW;
+
+  ctx.fillStyle = "#0f0";
+  ctx.font = "12px monospace";
+  ctx.textAlign = "right";
+  ctx.fillText("LIVES", canvas.width - padding, y - 2);
+  ctx.textAlign = "left";
+
+  ctx.fillStyle = "#0f0";
+  for (let i = 0; i < lives; i++) {
+    drawPlayer(startX + i * (iconW + gap), y, iconW, iconH);
+  }
+}
+
 function draw() {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.fillStyle = "#0f0";
-  drawPlayer(player.x, player.y, player.w, player.h);
+  if (!explosion) drawPlayer(player.x, player.y, player.w, player.h);
   invaders.forEach(inv => {
     if (inv.alive) drawInvader(inv.x, inv.y, inv.w, inv.h);
   });
@@ -199,9 +293,12 @@ function draw() {
   ctx.fillStyle = "#f00";
   enemyBullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
 
+  if (explosion) drawExplosion();
+
   ctx.fillStyle = "#0f0";
   ctx.font = "16px monospace";
-  ctx.fillText("SCORE:" + score + "  LIVES:" + lives + "  WAVE:" + wave, 10, 24);
+  ctx.fillText("SCORE:" + score + "  WAVE:" + wave, 10, 24);
+  drawLivesHUD();
 
   if (gameOver) {
     ctx.textAlign = "center";
