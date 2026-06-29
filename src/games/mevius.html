@@ -30,7 +30,7 @@ canvas {
 </head>
 <body>
 <canvas id="c" width="640" height="480"></canvas>
-<div id="info">←→↑↓ 移動 | スペース 対空 | X 対地 | アイテムで武器強化・バリア・無敵・誘導弾 | R リスタート</div>
+<div id="info">←→↑↓ 移動 | スペース 対空 | X 対地 | アイテムで武器強化・バリア・無敵・誘導弾・山火事 | R リスタート</div>
 <script>
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
@@ -42,9 +42,11 @@ const WORLD_H = 4800;
 
 let player, zappers, blasters, flames, missiles, airEnemies, groundTargets, enemyBullets, items;
 let scrollY, score, lives, wave, gameOver, keys = {}, shootCooldown = 0, bombCooldown = 0;
-let explosion = null, spawnTimer = 0, groundSpawnTimer = 0;
+let explosion = null, spawnTimer = 0, groundSpawnTimer = 0, wildfire = null, legendFadeTimer = 0;
 const WEAPON_DURATION = 540;
 const INVINCIBLE_DURATION = 480;
+const WILDFIRE_DURATION = 180;
+const LEGEND_FADE_FRAMES = 600;
 const POWERUP_DROP_RATE = 0.17;
 const MAX_BARRIER = 8;
 const FUNNEL_LEVELS = [
@@ -55,6 +57,41 @@ const FUNNEL_LEVELS = [
   { count: 8, speed: 24, vy: -18, turnRate: 0.22, damage: 3, interval: 18 }
 ];
 const FUNNEL_ITEM_COLORS = ["#f88", "#f66", "#f44", "#ffd060"];
+const STARTING_LOADOUT = {
+  radBeam: true,
+  flame: true,
+  barrier8: true,
+  invincibleStar: true
+};
+
+function applyStartingLoadout() {
+  if (STARTING_LOADOUT.radBeam) {
+    player.airWeapon = "radBeam";
+    player.airWeaponTimer = WEAPON_DURATION;
+  }
+  if (STARTING_LOADOUT.flame) {
+    player.groundWeapon = "flame";
+    player.groundWeaponTimer = WEAPON_DURATION;
+  }
+  if (STARTING_LOADOUT.barrier8) {
+    player.barrier = MAX_BARRIER;
+  }
+  if (STARTING_LOADOUT.invincibleStar) {
+    player.invincibleTimer = INVINCIBLE_DURATION;
+  }
+}
+
+function resetLegendFade() {
+  legendFadeTimer = LEGEND_FADE_FRAMES;
+}
+
+function updateLegendFade() {
+  if (legendFadeTimer > 0) legendFadeTimer--;
+}
+
+function getLegendAlpha() {
+  return Math.max(0, legendFadeTimer / LEGEND_FADE_FRAMES);
+}
 
 function init(resetScore) {
   player = {
@@ -83,7 +120,10 @@ function init(resetScore) {
   explosion = null;
   spawnTimer = 0;
   groundSpawnTimer = 0;
+  wildfire = null;
+  applyStartingLoadout();
   seedInitialGround();
+  resetLegendFade();
 }
 
 function seedInitialGround() {
@@ -164,7 +204,8 @@ function pickPowerUpType() {
   if (roll < 0.36) return "funnelMissile4";
   if (roll < 0.50) return "barrier1";
   if (roll < 0.64) return "barrier2";
-  if (roll < 0.77) return "barrier8";
+  if (roll < 0.75) return "barrier8";
+  if (roll < 0.77) return "wildfire";
   return "invincibleStar";
 }
 
@@ -198,6 +239,65 @@ function applyBarrierItem(type) {
   player.barrierFlash = 24;
 }
 
+function triggerWildfire() {
+  wildfire = { timer: WILDFIRE_DURATION, frame: 0 };
+
+  for (const g of groundTargets) {
+    if (!g.alive) continue;
+    const sy = worldToScreen(g.worldY);
+    if (sy < -g.h || sy > H) continue;
+    g.alive = false;
+    score += g.score;
+    addBurst(g.x + g.w / 2, sy + g.h / 2, 16, ["#f80", "#ff0", "#f60", "#fff"]);
+  }
+
+  enemyBullets = enemyBullets.filter(b => {
+    if (b.kind !== "ground") return true;
+    const sy = b.y + b.h / 2;
+    if (sy < H * 0.3) return true;
+    addBurst(b.x + b.w / 2, sy, 5, ["#f80", "#ff0", "#fa0"]);
+    return false;
+  });
+
+  for (let x = 0; x < W; x += 32) {
+    addBurst(x + Math.random() * 16, H * 0.55 + Math.random() * (H * 0.4), 6, ["#f80", "#ff0", "#f60"]);
+  }
+  addBurst(W / 2, H * 0.72, 36, ["#f80", "#ff0", "#fa0", "#fff", "#f60"]);
+}
+
+function updateWildfire() {
+  if (!wildfire) return;
+  wildfire.frame++;
+  wildfire.timer--;
+  if (wildfire.timer <= 0) {
+    wildfire = null;
+    return;
+  }
+  if (wildfire.frame % 5 === 0) {
+    for (let i = 0; i < 4; i++) {
+      addBurst(
+        Math.random() * W,
+        H * 0.42 + Math.random() * (H * 0.55),
+        2,
+        ["#f80", "#ff0", "#f60", "#fff"]
+      );
+    }
+  }
+  if (wildfire.frame % 18 === 0) {
+    for (const g of groundTargets) {
+      if (!g.alive) continue;
+      const sy = worldToScreen(g.worldY);
+      if (sy < H * 0.38 || sy > H + g.h) continue;
+      g.hp -= 2;
+      if (g.hp <= 0) {
+        g.alive = false;
+        score += g.score;
+        addBurst(g.x + g.w / 2, sy + g.h / 2, 10, ["#f80", "#ff0", "#f60"]);
+      }
+    }
+  }
+}
+
 function collectPowerUp(item) {
   if (item.type === "radBeam") {
     player.airWeapon = "radBeam";
@@ -214,6 +314,9 @@ function collectPowerUp(item) {
   } else if (item.type === "invincibleStar") {
     player.invincibleTimer = INVINCIBLE_DURATION;
     addBurst(item.x + item.w / 2, item.y + item.h / 2, 16, ["#ff0", "#fff", "#f8f", "#0ff", "#fa0"]);
+  } else if (item.type === "wildfire") {
+    triggerWildfire();
+    addBurst(item.x + item.w / 2, item.y + item.h / 2, 20, ["#f80", "#ff0", "#f60", "#fff", "#fa0"]);
   } else {
     applyBarrierItem(item.type);
     addBurst(item.x + item.w / 2, item.y + item.h / 2, 12, ["#8cf", "#adf", "#fff", "#59d7ff"]);
@@ -406,6 +509,7 @@ function startPlayerExplosion() {
   player.barrier = 0;
   player.barrierFlash = 0;
   player.invincibleTimer = 0;
+  legendFadeTimer = 0;
   missiles = [];
   const cx = player.x + player.w / 2;
   const cy = player.y + player.h / 2;
@@ -463,10 +567,12 @@ function updateExplosion() {
         player.bank = 0;
         player.afterburner = 0;
         player.afterburnerFrame = 0;
+        resetLegendFade();
       }
     }
   }
 
+  updateLegendFade();
   updateBurstParticles();
 }
 
@@ -502,6 +608,7 @@ function update() {
   }
   if (gameOver) return;
   updateBurstParticles();
+  updateLegendFade();
 
   scrollY += SCROLL_SPEED + wave * 0.05;
 
@@ -537,6 +644,7 @@ function update() {
   if (player.invincibleTimer > 0) {
     player.invincibleTimer--;
   }
+  updateWildfire();
   if (keys.Space) fireZapper();
   if (keys.KeyX) fireBlaster();
 
@@ -566,7 +674,8 @@ function update() {
   groundSpawnTimer++;
   if (groundSpawnTimer >= 58) {
     groundSpawnTimer = 0;
-    if (Math.random() < 0.88) {
+    const spawnChance = wildfire ? 0.35 : 0.88;
+    if (Math.random() < spawnChance) {
       spawnGroundTarget(-scrollY - 90 - Math.random() * 80);
     }
   }
@@ -984,10 +1093,19 @@ function drawNazcaField() {
 }
 
 function drawBackground() {
+  const burning = wildfire && wildfire.timer > 0;
+  const burnRatio = burning ? wildfire.timer / WILDFIRE_DURATION : 0;
+
   const grass = ctx.createLinearGradient(0, 0, 0, H);
-  grass.addColorStop(0, "#4f7d35");
-  grass.addColorStop(0.45, "#6a943f");
-  grass.addColorStop(1, "#8a7a3c");
+  if (burning) {
+    grass.addColorStop(0, "#4a3518");
+    grass.addColorStop(0.45, "#5a2818");
+    grass.addColorStop(1, "#3a1208");
+  } else {
+    grass.addColorStop(0, "#4f7d35");
+    grass.addColorStop(0.45, "#6a943f");
+    grass.addColorStop(1, "#8a7a3c");
+  }
   ctx.fillStyle = grass;
   ctx.fillRect(0, 0, W, H);
 
@@ -1022,11 +1140,11 @@ function drawBackground() {
       ctx.beginPath();
       ctx.arc(x, y, 8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#0f3418";
+      ctx.fillStyle = burning ? "#1a0a04" : "#0f3418";
       ctx.beginPath();
       ctx.arc(x + 3, y + 3, 5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#174c22";
+      ctx.fillStyle = burning ? "#3a1808" : "#174c22";
     }
   }
 
@@ -1049,6 +1167,44 @@ function drawBackground() {
 
   ctx.fillStyle = "rgba(190, 230, 190, 0.08)";
   ctx.fillRect(0, 0, W, H);
+
+  if (burning) {
+    const smoke = ctx.createLinearGradient(0, H * 0.25, 0, H);
+    smoke.addColorStop(0, `rgba(80, 40, 10, ${0.08 * burnRatio})`);
+    smoke.addColorStop(0.45, `rgba(160, 50, 10, ${0.18 * burnRatio})`);
+    smoke.addColorStop(1, `rgba(60, 15, 0, ${0.28 * burnRatio})`);
+    ctx.fillStyle = smoke;
+    ctx.fillRect(0, H * 0.25, W, H * 0.75);
+  }
+}
+
+function drawWildfireOverlay() {
+  if (!wildfire || wildfire.timer <= 0) return;
+  const ratio = wildfire.timer / WILDFIRE_DURATION;
+  const frame = wildfire.frame;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+
+  for (let x = 0; x < W; x += 18) {
+    const baseY = H - 8 + Math.sin(frame * 0.12 + x * 0.07) * 4;
+    const flameH = 22 + Math.sin(frame * 0.18 + x * 0.11) * 14 + ((x * 17) % 11);
+    const alpha = (0.35 + Math.sin(frame * 0.2 + x) * 0.12) * ratio;
+    const grad = ctx.createLinearGradient(x, baseY, x, baseY - flameH);
+    grad.addColorStop(0, `rgba(255, 220, 80, ${alpha})`);
+    grad.addColorStop(0.35, `rgba(255, 100, 20, ${alpha * 0.85})`);
+    grad.addColorStop(1, "rgba(255, 40, 0, 0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, baseY - flameH, 14, flameH);
+  }
+
+  for (let band = 0; band < 3; band++) {
+    const y = H * (0.45 + band * 0.16) + Math.sin(frame * 0.08 + band) * 6;
+    ctx.fillStyle = `rgba(255, 90, 10, ${(0.06 + band * 0.03) * ratio})`;
+    ctx.fillRect(0, y, W, 28 + band * 8);
+  }
+
+  ctx.restore();
 }
 
 function drawAfterburner(sx, sy, intensity, frame) {
@@ -1614,6 +1770,37 @@ function drawPowerUp(item) {
     ctx.font = "8px monospace";
     ctx.textAlign = "center";
     ctx.fillText("STR", 0, 16);
+  } else if (item.type === "wildfire") {
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 16);
+    glow.addColorStop(0, `rgba(255, 220, 120, ${0.95 * pulse})`);
+    glow.addColorStop(0.4, `rgba(255, 80, 10, ${0.7 * pulse})`);
+    glow.addColorStop(1, "rgba(120, 20, 0, 0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#ff0";
+    ctx.lineWidth = 2;
+    for (let r = 0; r < 8; r++) {
+      const ang = r * Math.PI / 4 + item.timer * 0.04;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * 4, Math.sin(ang) * 4);
+      ctx.lineTo(Math.cos(ang) * 12, Math.sin(ang) * 12);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#f80";
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.quadraticCurveTo(7, 0, 5, 9);
+    ctx.quadraticCurveTo(0, 5, -5, 9);
+    ctx.quadraticCurveTo(-7, 0, 0, -8);
+    ctx.fill();
+    ctx.fillStyle = "#ff0";
+    ctx.font = "8px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("WFR", 0, 15);
   } else {
     const isMax = item.type === "barrier8";
     const layers = item.type === "barrier1" ? 1 : item.type === "barrier2" ? 2 : 8;
@@ -1787,6 +1974,9 @@ function drawWeaponStatus() {
   if (player.invincibleTimer > 0) {
     entries.push({ label: "INV STAR", color: "#ffe570", timer: player.invincibleTimer, max: INVINCIBLE_DURATION });
   }
+  if (wildfire && wildfire.timer > 0) {
+    entries.push({ label: "WILDFIRE", color: "#f80", timer: wildfire.timer, max: WILDFIRE_DURATION });
+  }
   if (player.barrier > 0) {
     entries.push({ label: "BARRIER", color: "#59d7ff", segments: player.barrier, max: MAX_BARRIER });
   }
@@ -1824,9 +2014,13 @@ function drawWeaponStatus() {
 }
 
 function drawLayerLegend() {
+  const alpha = getLegendAlpha();
+  if (alpha <= 0) return;
+
   ctx.save();
+  ctx.globalAlpha = alpha;
   ctx.fillStyle = "rgba(2, 6, 18, 0.72)";
-  roundRect(8, H - 56, 320, 56, 5);
+  roundRect(8, H - 56, 360, 56, 5);
   ctx.fill();
 
   ctx.fillStyle = "#35f4ff";
@@ -1885,6 +2079,25 @@ function drawLayerLegend() {
   ctx.restore();
   ctx.fillStyle = "#ccc";
   ctx.fillText("STR", 228, H - 18);
+  ctx.fillStyle = "#f80";
+  ctx.beginPath();
+  ctx.moveTo(252, H - 26);
+  ctx.lineTo(258, H - 18);
+  ctx.lineTo(246, H - 18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#ff0";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(252, H - 26);
+  ctx.lineTo(252, H - 30);
+  ctx.moveTo(252, H - 26);
+  ctx.lineTo(248, H - 22);
+  ctx.moveTo(252, H - 26);
+  ctx.lineTo(256, H - 22);
+  ctx.stroke();
+  ctx.fillStyle = "#ccc";
+  ctx.fillText("WFR", 264, H - 18);
 
   for (let lv = 1; lv <= 4; lv++) {
     const lx = 118 + (lv - 1) * 34;
@@ -1906,12 +2119,13 @@ function drawLayerLegend() {
 
   ctx.fillStyle = "#888";
   ctx.font = "8px monospace";
-  ctx.fillText("F1〜F4=誘導弾Lv", 14, H - 6);
+  ctx.fillText("F1〜F4=誘導弾Lv | WFR=山火事", 14, H - 6);
   ctx.restore();
 }
 
 function draw() {
   drawBackground();
+  drawWildfireOverlay();
 
   for (const g of groundTargets) {
     if (g.alive) drawGroundTarget(g, worldToScreen(g.worldY));
